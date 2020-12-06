@@ -24,33 +24,6 @@ scale_fill_discrete = scale_fill_viridis_d
 theme_set(theme_minimal() + theme(legend.position = "bottom"))
 ```
 
-### Due date
-
-Due: December 4 at 10:00pm. 
-
-### Points
-
-* Problem 0: 20 points
-* Problem 1: -- points
-* Problem 2: 40 points
-* Problem 3: 40 points
-
-
-### Problem 0
-
-This "problem" focuses on structure of your assignment, including the use of R Markdown to write reproducible reports, the use of R Projects to organize your work, the use of relative paths to load data, and the naming structure for your files. 
-
-To that end: 
-
-* create a public GitHub repo + local R Project for this assignment
-* write solutions using a .Rmd file that outputs a `github_document` / .md file
-* submit a link to your repo via Courseworks
-
-Your solutions to Problems 1 and 2 should be implemented in your .Rmd file, and your git commit history should reflect the process you used to solve these Problems. 
-
-For Problem 0, we will assess adherence to the instructions above regarding repo structure, git commit history, and whether we are able to knit your .Rmd to ensure that your work is reproducible. Adherence to appropriate styling and clarity of code will be assessed in Problems 1+ using the homework [style rubric](homework_style_rubric.html). 
-
-This homework includes figures; the readability of your embedded plots (e.g. font sizes, axis labels, titles) will be assessed in Problems 1+.
 
 ```{r load_libraries}
 library(tidyverse)
@@ -135,20 +108,78 @@ models_results_df %>%
 
 Find some residuals
 
+Load data
 ```{r}
 baby_df = 
   read_csv("./data/birthweight.csv")
 ```
 
-fit a model
-
 ```{r}
-model_fit = lm(bwt ~ gaweeks, data = baby_df)
+baby_df = 
+  baby_df %>% 
+  mutate(
+    babysex = as.factor(babysex),
+   # bwt = as.factor(bwt),
+    frace = as.factor(frace),
+    malform = as.factor(malform),
+    mrace = as.factor(mrace),
+    parity = as.factor(parity),
+    pnumlbw = as.factor(pnumlbw),
+    pnumsga = as.factor(pnumsga)
+  )
 ```
+
+Proposed Model
+```{r}
+model_fit_proposal = lm(bwt ~ bhead + blength + babysex + gaweeks + mrace + fincome + smoken + ppbmi + bhead*babysex + blength*babysex + bhead*blength*babysex , data = baby_df)
+
+model_fit_proposal %>% 
+  broom::tidy() %>% 
+  knitr::kable()
+```
+
+I picked this model by doing backwards stepwise with all main effects and interactions/three-way intractions for `blength`, `bhead`, and `babysex`. I used the criteria that the p-value had to be less than 0.05 for the model. Many of the physical characteristics of the baby (`bhead`, `blength`, `babysex`, `gaweeks`) and mom health and socioeconomic factors (`mrace`, `fincome`, `smoken`, `ppbmi`) made it into the model. Factors with just one level (`pnumsga` and `pnumlbw`) were not incorporated since these factors didn't have enough levels.
 
 ```{r}
 baby_df %>% 
-  modelr::add_residuals(model_fit) %>% 
-  ggplot(aes(x = gaweeks, y = resid)) + 
+  modelr::add_residuals(model_fit_proposal) %>% 
+  modelr::add_predictions(model_fit_proposal) %>% 
+  ggplot(aes(x = pred, y = resid)) + 
   geom_point()
+```
+
+When looking at the residuals versus and predictions plot for the model, we notice that the residuals are spread evenly around 0 when the bwt prediction is above 2000 g. There might be some points under this weight that are outliers or cannot be explained by the factors in the model.
+
+```{r}
+cv_baby_df = 
+  crossv_mc(baby_df, 100) %>% 
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble)) %>% 
+  mutate(
+    model_fit_proposal = map(train, ~lm(bwt ~ bhead + blength + babysex + gaweeks + mrace + fincome + smoken + ppbmi + bhead*babysex + blength*babysex + bhead*blength*babysex , data = .x)),
+    model_fit_a  = map(train, ~lm(bwt ~ gaweeks + blength, data = .x)),
+    model_fit_b  = map(train, ~lm(bwt ~ bhead + blength + babysex + bhead*blength + bhead*babysex + blength*babysex + bhead*blength*babysex, sp = 10e-6, data = .x))
+    ) %>% 
+  mutate(
+    rmse_proposal = map2_dbl(model_fit_proposal, test, ~rmse(model = .x, data = .y)),
+    rmse_fit_a = map2_dbl(model_fit_a, test, ~rmse(model = .x, data = .y)),
+    rmse_fit_b = map2_dbl(model_fit_b, test, ~rmse(model = .x, data = .y))    
+  ) %>% 
+  mutate(
+    
+  )
+```
+
+This graph compares the models to each other. As you can see from the RMSE plots, the proposed model has the lowest RMSE compared to model A and model B. 
+```{r}
+cv_baby_df %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(),
+    names_to = "model", 
+    values_to = "rmse",
+    names_prefix = "rmse_") %>% 
+  mutate(model = fct_inorder(model)) %>% 
+  ggplot(aes(x = model, y = rmse)) + geom_violin()
 ```
