@@ -197,7 +197,69 @@ weather_df =
   select(name, id, everything())
 ```
 
+Explore tmin and tmax relationship with a scatterplot
 ```{r}
-
+weather_df %>% 
+  ggplot(aes(x = tmin, y = tmax)) + geom_point() + stat_smooth(method = "lm")
 ```
 
+Bootstrap and model tmin and tmax. Clean up and wrangle in order to extract r_squared and calculate log(intercept_hat*tmin_hat).
+```{r}
+weather_df_bootstrap = 
+weather_df %>% 
+  modelr::bootstrap(n = 5000) %>% 
+  mutate(
+    models = map(strap, ~lm(tmax ~ tmin, data = .x) ),
+    results = map(models, broom::tidy),
+    results_extra = map(models, broom::glance)) %>% 
+  select(-strap, -models) %>% 
+  unnest(results, results_extra) 
+ 
+weather_df_bootstrap = 
+  weather_df_bootstrap %>% 
+   select(.id:r.squared) 
+
+weather_df_bootstrap_2 =
+  weather_df_bootstrap %>% 
+  select(.id, term, estimate, r.squared) %>% 
+  pivot_wider(
+    id_cols = c(".id", "r.squared"),
+    names_from = term, 
+    values_from = estimate
+  ) %>% 
+  janitor::clean_names() %>% 
+  mutate(
+    boot_log = log(intercept*tmin)
+  )
+```
+
+Plot the distribution of estimates and r_squared and log(intercept_hat*tmin_hat)
+```{r}
+weather_df_bootstrap_2 %>% 
+  ggplot(aes(x = tmin)) + geom_density()
+
+weather_df_bootstrap_2 %>% 
+  ggplot(aes(x = intercept)) + geom_density()
+
+weather_df_bootstrap_2 %>% 
+  ggplot(aes(x = r_squared)) + geom_density()
+
+weather_df_bootstrap_2 %>% 
+  ggplot(aes(x = boot_log)) + geom_density()
+```
+
+Determine the 95% CI for r_squared and log(intercept_hat*tmin_hat)
+
+```{r}
+weather_df_bootstrap_2 %>% 
+  mutate(
+    ci_lower_r_squared = quantile(r_squared, 0.025),
+    ci_upper_r_squared = quantile(r_squared, 0.975),
+    ci_lower_boot_log = quantile(boot_log, 0.025),
+    ci_upper_boot_log = quantile(boot_log, 0.975),
+  ) 
+```
+
+The 95% CI for R_Squared_hat is `r weather_df_bootstrap_2 %>% pull(r_squared) %>% quantile(., 0.025)` - `r weather_df_bootstrap_2 %>% pull(r_squared) %>% quantile(., 0.975)`.
+
+The 95% CI for log(intercept_hat*tmin_hat) is `r weather_df_bootstrap_2 %>% pull(boot_log) %>% quantile(., 0.025)` - `r weather_df_bootstrap_2 %>% pull(boot_log) %>% quantile(., 0.975)`.
